@@ -1,0 +1,305 @@
+param vnetName string = 'vnet'
+param vnetAddressPrefix string = '10.0.0.0/16'
+param location string = resourceGroup().location
+param ContainerGroupName string = 'containergroup'
+param ContainerGroupName2 string = 'containergroup2'
+param containerName string = 'container'
+param containerName2 string = 'container2'
+param image string = 'mcr.microsoft.com/azuredocs/aci-helloworld'
+param cpuCores int = 1
+param minCapacity int = 2
+param maxCapacity int = 10
+param frontendPort int = 80
+param backendPort int = 80
+param subnet1AddressPrefix string = '10.0.0.0/24'
+param subnet2AddressPrefix string = '10.0.1.0/24'
+param subnet2Name string = 'ApplicationGatewaySubnet2'
+param subnet1Name string = 'ApplicationGatewaySubnet1'
+@allowed([
+  'Enabled'
+  'Disabled'
+])
+param cookieBasedAffinity string = 'Disabled'
+param applicationGatewayName string = 'applicationGatewayV2'
+param memoryInGb int = 2
+
+
+
+resource AppGateway 'Microsoft.Network/applicationGateways@2020-06-01' = {
+  name: applicationGatewayName
+  location: location
+  properties: {
+    sku: {
+      name: 'Standard_v2'
+      tier: 'Standard_v2'
+    }
+    autoscaleConfiguration: {
+      minCapacity: minCapacity
+      maxCapacity: maxCapacity
+    }
+    gatewayIPConfigurations: [
+      {
+        name: 'appGatewayIpConfig'
+        properties: {
+          subnet: {
+            id: resourceId('Microsoft.Network/virtualNetworks/subnets', vnetName, subnet2Name)
+          }
+        }
+      }
+    ]
+    frontendIPConfigurations: [
+      {
+        name: 'appGatewayFrontendIP'
+        properties: {
+          publicIPAddress: {
+            id: PublicIP.id
+          }
+        }
+      }
+    ]
+    frontendPorts: [
+      {
+        name: 'appGatewayFrontendPort'
+        properties: {
+          port: frontendPort
+        }
+      }
+    ]
+    backendAddressPools: [
+      {
+        name: 'appGatewayBackendPool'
+        properties: {
+          backendAddresses: [
+            {
+              ipAddress: ContainerG.properties.ipAddress.ip
+            }
+            {
+              ipAddress:ContainerG2.properties.ipAddress.ip
+            }
+
+          ]
+
+        }
+
+      }
+
+    ]
+    backendHttpSettingsCollection: [
+      {
+        name: 'appGatewayBackendHttpSettings'
+        properties: {
+          port: backendPort
+          protocol: 'Http'
+          cookieBasedAffinity: 'Disabled'
+        }
+      }
+    ]
+    httpListeners: [
+      {
+        name: 'appGatewayHttpListener'
+        properties: {
+          frontendIPConfiguration: {
+            id: resourceId('Microsoft.Network/applicationGateways/frontendIPConfigurations', applicationGatewayName, 'appGatewayFrontendIP')
+          }
+          frontendPort: {
+            id:resourceId('Microsoft.Network/applicationGateways/frontendPorts', applicationGatewayName, 'appGatewayFrontendPort')
+          }
+          protocol: 'Http'
+        }
+      }
+    ]
+    requestRoutingRules: [
+      {
+        name: 'rule1'
+        properties: {
+          ruleType: 'Basic'
+          httpListener: {
+            id: resourceId('Microsoft.Network/applicationGateways/httpListeners', applicationGatewayName, 'appGatewayHttpListener')
+          }
+          backendAddressPool: {
+            id: resourceId('Microsoft.Network/applicationGateways/backendAddressPools', applicationGatewayName, 'appGatewayBackendPool')
+          }
+          backendHttpSettings: {
+            id: resourceId('Microsoft.Network/applicationGateways/backendHttpSettingsCollection', applicationGatewayName, 'appGatewayBackendHttpSettings')
+          }
+        }
+      }
+    ]
+  }
+}
+
+
+
+resource NetPro2 'Microsoft.Network/networkProfiles@2020-05-01' = {
+  name:'NetWorkPro2'
+  location: location
+  properties: {
+    containerNetworkInterfaceConfigurations: [
+      {
+        name: 'eth1'
+        properties: {
+          ipConfigurations: [
+            {
+              name: 'ipconfigprofile2'
+              properties: {
+                subnet: {
+                  id: resourceId('Microsoft.Network/virtualnetworks/subnets', vnetName, subnet1Name)
+                }
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+  dependsOn: [
+    Virtualnetwork
+  ]
+
+
+}
+
+resource NetPro 'Microsoft.Network/networkProfiles@2020-05-01' = {
+  name: 'networkProfile'
+  location: location
+  properties: {
+    containerNetworkInterfaceConfigurations: [
+      {
+        name: 'eth0'
+        properties: {
+          ipConfigurations: [
+            {
+              name: 'ipconfigprofile1'
+              properties: {
+                subnet: {
+                  id: resourceId('Microsoft.Network/virtualnetworks/subnets', vnetName, subnet1Name)
+                }
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+  dependsOn: [
+    Virtualnetwork
+  ]
+}
+
+resource Virtualnetwork 'Microsoft.Network/virtualNetworks@2020-05-01' = {
+  name: vnetName
+  location: location
+  properties: {
+    addressSpace: {
+      addressPrefixes: [
+        vnetAddressPrefix
+      ]
+    }
+    subnets: [
+      {
+        name: subnet1Name
+        properties: {
+          addressPrefix: subnet1AddressPrefix
+          delegations: [
+            {
+              name: 'DelegationService'
+              properties: {
+                serviceName: 'Microsoft.ContainerInstance/containerGroups'
+              }
+            }
+          ]
+        }
+      }
+      {
+        name: subnet2Name
+        properties: {
+          addressPrefix: subnet2AddressPrefix
+        }
+      }
+    ]
+  }
+}
+
+resource ContainerG 'Microsoft.ContainerInstance/containerGroups@2019-12-01' = {
+  name: ContainerGroupName
+  location: location
+  properties: {
+    containers: [
+      {
+        name: containerName
+        properties: {
+          image: image
+          ports: [
+            {
+              port: 80
+              protocol: 'TCP'
+            }
+          ]
+          resources: {
+            requests: {
+              cpu: cpuCores
+              memoryInGB: memoryInGb
+            }
+          }
+        }
+      }
+    ]
+    osType: 'Linux'
+    networkProfile: {
+      id: NetPro.id
+    }
+    restartPolicy: 'Always'
+  }
+}
+resource ContainerG2 'Microsoft.ContainerInstance/containerGroups@2019-12-01' = {
+  name: ContainerGroupName2
+  location: location
+  properties: {
+    containers: [
+      {
+        name: containerName2
+        properties: {
+          image: image
+          ports: [
+            {
+              port: 80
+              protocol: 'TCP'
+            }
+          ]
+          resources: {
+            requests: {
+              cpu: cpuCores
+              memoryInGB: memoryInGb
+            }
+          }
+        }
+      }
+    ]
+    osType: 'Linux'
+    networkProfile: {
+      id: NetPro2.id
+    }
+    restartPolicy: 'Always'
+  }
+}
+
+
+
+
+
+
+resource PublicIP 'Microsoft.Network/publicIPAddresses@2020-06-01' = {
+  name: '${applicationGatewayName}-PublicAD'
+  location: location
+  sku: {
+    name: 'Standard'
+  }
+  properties: {
+    publicIPAllocationMethod: 'Static'
+    publicIPAddressVersion: 'IPv4'
+    dnsSettings:{
+       domainNameLabel: 'Daniel-DNS'
+    }
+  }
+}
+output containerIPv4Address string = ContainerG.properties.ipAddress.ip
